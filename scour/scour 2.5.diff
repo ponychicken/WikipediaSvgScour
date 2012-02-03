@@ -1,0 +1,214 @@
+--- /Volumes/Azazel/Downloads/scour/scour.py	2010-07-11 17:36:00.000000000 +0200
++++ /Volumes/Azazel/Downloads/scour/scour 2.5 patched.py	2010-10-23 23:10:48.000000000 +0200
+@@ -49,6 +49,7 @@
+ import os
+ import sys
+ import xml.dom.minidom
++import xml.dom
+ import re
+ import math
+ from svg_regex import svg_parser
+@@ -1253,15 +1254,15 @@
+ 
+ 		#  if stroke:none, then remove all stroke-related properties (stroke-width, etc)
+ 		#  TODO: should also detect if the computed value of this element is stroke="none"
+-		if styleMap.has_key('stroke') and styleMap['stroke'] == 'none' :
+-			for strokestyle in [ 'stroke-width', 'stroke-linejoin', 'stroke-miterlimit', 
+-					'stroke-linecap', 'stroke-dasharray', 'stroke-dashoffset', 'stroke-opacity'] :
+-				if styleMap.has_key(strokestyle) :
+-					del styleMap[strokestyle]
+-					num += 1
+-			# TODO: This is actually a problem if a parent element has a specified stroke
++		# if styleMap.has_key('stroke') and styleMap['stroke'] == 'none' :
++		# 			for strokestyle in [ 'stroke-width', 'stroke-linejoin', 'stroke-miterlimit', 
++		# 					'stroke-linecap', 'stroke-dasharray', 'stroke-dashoffset', 'stroke-opacity'] :
++		# 				if styleMap.has_key(strokestyle) :
++		# 					del styleMap[strokestyle]
++		# 					num += 1
++					# TODO: This is actually a problem if a parent element has a specified stroke
+ 			# we need to properly calculate computed values
+-			del styleMap['stroke']
++		#	del styleMap['stroke']
+ 
+ 		#  if fill:none, then remove all fill-related properties (fill-rule, etc)
+ 		if styleMap.has_key('fill') and styleMap['fill'] == 'none' :
+@@ -2340,47 +2341,57 @@
+ 	if href != '' and len(href) > 1:
+ 		# find if href value has filename ext		
+ 		ext = os.path.splitext(os.path.basename(href))[1].lower()[1:]
+-				
+-		# look for 'png', 'jpg', and 'gif' extensions 
+-		if ext == 'png' or ext == 'jpg' or ext == 'gif':
++		element.parentNode.removeChild(element)		
++		
++def removeHidden(element, options) :
+ 
+-			# check if href resolves to an existing file
+-			if os.path.isfile(href) == False :
+-				if href[:7] != 'http://' and os.path.isfile(href) == False :
+-						# if this is not an absolute path, set path relative
+-						# to script file based on input arg 
+-						infilename = '.'
+-						if options.infilename: infilename = options.infilename
+-						href = os.path.join(os.path.dirname(infilename), href)				
+-			
+-			rasterdata = ''
+-			# test if file exists locally
+-			if os.path.isfile(href) == True :
+-				# open raster file as raw binary
+-				raster = open( href, "rb")
+-				rasterdata = raster.read()
+-
+-			elif href[:7] == 'http://':
+-				# raster = open( href, "rb")
+-				webFile = urllib.urlopen( href )
+-				rasterdata = webFile.read()
+-				webFile.close()
+-			
+-			# ... should we remove all images which don't resolve?	
+-			if rasterdata != '' :
+-				# base64-encode raster
+-				b64eRaster = base64.b64encode( rasterdata )
+-
+-				# set href attribute to base64-encoded equivalent
+-				if b64eRaster != '':
+-					# PNG and GIF both have MIME Type 'image/[ext]', but 
+-					# JPEG has MIME Type 'image/jpeg'
+-					if ext == 'jpg':
+-						ext = 'jpeg'
+-
+-					element.setAttributeNS(NS['XLINK'], 'href', 'data:image/' + ext + ';base64,' + b64eRaster)
+-					numRastersEmbedded += 1
+-					del b64eRaster				
++	displayed = element.getAttribute('display')
++	if displayed == 'none':
++		element.parentNode.removeChild(element)
++
++
++
++
++def removeFlow(element, options, doc) :
++	"""
++	Experimentally convert Flowtext to normal text. Not all attributes may survive this
++	"""
++	global numFlowsremoved
++	#print element.tag
++
++	y = element.firstChild.firstChild.getAttribute('y')
++	x = element.firstChild.firstChild.getAttribute('x')
++	width = element.firstChild.firstChild.getAttribute('width')
++	height = element.firstChild.firstChild.getAttribute('height')
++	#nodes = element.lastChild.data
++	try:
++		fontsize = element.lastChild.getAttribute('font-size')
++		element.setAttribute('font-size', fontsize)
++	except:
++		print "Couldn't get fontsize"
++	try:
++		text = element.lastChild.firstChild.nodeValue
++	except AttributeError:
++		for node in element.childNodes:
++			element.removeChild(node)
++		for node in element.childNodes:
++			element.removeChild(node)
++
++		return
++	#element.nodeValue = text
++	new = doc.createTextNode(text)
++
++	element.setAttribute('x', x)
++	element.setAttribute('y', y)
++	element.setAttribute('width', width)
++	element.setAttribute('height', height)
++
++	for node in element.childNodes:
++		element.removeChild(node)
++	for node in element.childNodes:
++		element.removeChild(node)
++
++	element.appendChild(new)       
+ 
+ def properlySizeDoc(docElement, options):
+ 	# get doc width and height
+@@ -2643,23 +2654,23 @@
+ 	
+ 	# remove empty defs, metadata, g
+ 	# NOTE: these elements will be removed even if they have (invalid) text nodes
+-	elemsToRemove = []
+-	for tag in ['defs', 'metadata', 'g'] :
+-		for elem in doc.documentElement.getElementsByTagName(tag) :
+-			removeElem = not elem.hasChildNodes()
+-			if removeElem == False :
+-				for child in elem.childNodes :
+-					if child.nodeType in [1, 3, 4, 8] :
+-						break
+-				else:
+-					removeElem = True
+-			if removeElem :
+-				elem.parentNode.removeChild(elem)
+-				numElemsRemoved += 1
+-
++	# elemsToRemove = []
++	# for tag in ['defs', 'metadata', 'g'] :
++	# 	for elem in doc.documentElement.getElementsByTagName(tag) :
++	# 		removeElem = not elem.hasChildNodes()
++	# 		if removeElem == False :
++	# 			for child in elem.childNodes :
++	# 				if child.nodeType in [1, 3, 4, 8] :
++	# 					break
++	# 			else:
++	# 				removeElem = True
++	# 		if removeElem :
++	# 			elem.parentNode.removeChild(elem)
++	# 			numElemsRemoved += 1
++	# 
+ 	# remove unreferenced gradients/patterns outside of defs
+-	while removeUnreferencedElements(doc) > 0:
+-		pass
++	# while removeUnreferencedElements(doc) > 0:
++	# 	pass
+ 
+ 	if options.strip_ids:
+ 		bContinueLooping = True
+@@ -2714,8 +2725,8 @@
+ 	for elem in doc.documentElement.getElementsByTagName('path') :
+ 		if elem.getAttribute('d') == '':
+ 			elem.parentNode.removeChild(elem)
+-		else:
+-			cleanPath(elem, options)
++		#else:
++		#	cleanPath(elem, options)
+ 	
+ 	# shorten ID names as much as possible
+ 	if options.shorten_ids:
+@@ -2741,7 +2752,13 @@
+ 	# convert rasters references to base64-encoded strings 
+ 	if options.embed_rasters:
+ 		for elem in doc.documentElement.getElementsByTagName('image') :
+-			embedRasters(elem, options)		
++			embedRasters(elem, options)	
++				
++		for elem in doc.documentElement.getElementsByTagName('flowRoot') :
++			removeFlow(elem, options, doc)		
++		
++		for elem in doc.documentElement.getElementsByTagName('g') :
++			removeHidden(elem, options)		
+ 
+ 	# properly size the SVG document (ideally width/height should be 100% with a viewBox)
+ 	if options.enable_viewboxing:
+@@ -2772,7 +2789,14 @@
+ 			total_output += "".join(lines)
+ 		else: # doctypes, entities, comments
+ 			total_output += child.toxml() + os.linesep
+-		
++	
++	
++	total_output = total_output.replace("font-family:'Courier,Helvetica,Times,Arial'","font-family:'DejaVu Sans Condensed'")
++	total_output = total_output.replace("\\t","")
++	total_output = total_output.replace("\\n","")
++	total_output = total_output.replace('opacity="1"','')
++	total_output = total_output.replace('<5','5')
++
+ 	return total_output
+ 
+ # used mostly by unit tests
